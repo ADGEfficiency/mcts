@@ -73,25 +73,35 @@ if __name__ == '__main__':
 
         return stats
 
-    stats = defaultdict(list)
-
     def rollouts(stats):
         infos = run_parllel()
         stats = backprop(infos, stats)
         return stats
 
     def summarize(stats):
-        total = 0
-        master_log = ''
-        for action, values in stats.items():
-            total += len(values)
-            log = '- action {} {:.2f} {:.2f} '.format(action, np.mean(values), np.std(values))
+        summary = {}
+        stat = namedtuple('stat', ['mean', 'std'])
 
-            master_log += ' {}'.format(log)
+        for action, returns in stats.items():
+            summary[action] = stat(np.mean(returns), np.std(returns))
 
-        print(master_log)
+        print(summary)
+        return summary
 
+    def policy(stats):
+
+        actions, returns = [], []
+
+        for action, mc_return in stats.items():
+            actions.append(action)
+            returns.append(mc_return)
+
+        return actions[np.argmax(returns)]
+
+    stats = defaultdict(list)
     for _ in range(100):
         stats = rollouts(stats)
         summarize(stats)
 
+        action = policy(stats)
+        print(action)
