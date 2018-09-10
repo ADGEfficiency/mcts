@@ -35,16 +35,10 @@ def parallel():
 
     processes = [mp.Process(target=count, args=(output_queue, ))
                  for _ in range(4)]
-    for p in processes:
-        p.start()
 
-    for p in processes:
-        p.join()
-
-    #  exit processes
+    [p.start() for p in processes]
     [p.join() for p in processes]
 
-    # #  get results
     return [output_queue.get() for p in processes]
 
 
@@ -56,4 +50,4 @@ def serial():
 
 if __name__ == '__main__':
     random.seed(42)
-    results = parallel()
+    result = parallel()
