@@ -1,75 +1,97 @@
-""" could use a energy_py memory strucutre (maybe?) """
-
 import multiprocessing as mp
 from energypy.common.memories import calculate_returns
 
 from collections import namedtuple, defaultdict
+from time import sleep
 
 import numpy as np
 
 import energypy
 
 
-def single_rollout(output):
+def count(rand, output):
+    for num in range(rand):
+        sleep(1)
+        print(num)
+    output.put(num)
+
+
+def single_rollout(output, seed):
     """ using uniform random policy means we don't need any stats """
 
-    print('rollout started')
     done = False
+    env = energypy.make_env('flex')
+    env.seed(seed)
     actions = env.action_space.discretize(10)
 
     s = env.reset()
 
     while not done:
-        action = actions[np.random.randint(
-            low=0, actions.shape[0])]
-        print(action)
+        action = env.action_space.sample_discrete()
         s, r, done, i = env.step(action)
 
-    rewards = i['reward']
-    mc_returns = calculate_returns(rewards, 1.0)
-    i['return'] = mc_returns
-    output.put(i)
-    print('rollout finished')
+    mc_returns = calculate_returns(
+        i['reward'], discount=1.0
+    )
 
+    out = {
+        'return': mc_returns[0],
+        'action': i['action'][0]
+    }
+    # out = np.random.uniform()
+    output.put(out)
 
-def array_to_tuple(arr):
-    return tuple(map(tuple, arr))
+def run_parllel():
+    output = mp.Queue()
 
+    # processes = [mp.Process(
+    #     target=count, args=(np.random.randint(low=1, high=8), output))
+    #              for _ in range(3)]
 
-def backprop(info, stats):
-    states = info['state']
-    actions = info['action']
-    returns = info['return']
+    seeds = [np.random.randint(0, 100) for _ in range(8)]
 
-    first_action = actions[0]
-    stats[first_action].append(float(returns[0]))
+    processes = [mp.Process(
+        target=single_rollout, args=(output, seed))
+                 for seed in seeds]
 
-    return stats
+    [p.start() for p in processes]
+    [p.join() for p in processes]
 
+    results = [output.get() for p in processes]
 
-def process_stats(stats):
-    for action, returns in stats.items():
-        print('{} {}'.format(action, np.mean(returns)))
-
+    return results
 
 if __name__ == '__main__':
 
-    env = energypy.make_env('flex')
+    def backprop(infos, stats):
+
+        for info in infos:
+            action = info['action']
+            mc_return = info['return']
+
+            stats[action].append(float(mc_return))
+
+        return stats
 
     stats = defaultdict(list)
 
-    batches = 2
-    batch_size = 4
+    def rollouts(stats):
+        infos = run_parllel()
+        stats = backprop(infos, stats)
+        return stats
 
-    output_queue = mp.Queue()
+    def summarize(stats):
+        total = 0
+        master_log = ''
+        for action, values in stats.items():
+            total += len(values)
+            log = '- action {} {:.2f} {:.2f} '.format(action, np.mean(values), np.std(values))
 
-    processes = [mp.Process(target=single_rollout, args=(output_queue, ))
-                 for _ in range(batch_size)]
+            master_log += ' {}'.format(log)
 
-    [p.start() for p in processes]
-    out = [output_queue.get() for p in processes]
-    [p.join() for p in processes]
+        print(master_log)
 
-    for info in out:
-        print(stats)
-        stats = backprop(info, stats)
+    for _ in range(100):
+        stats = rollouts(stats)
+        summarize(stats)
+
