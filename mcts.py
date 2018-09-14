@@ -1,14 +1,15 @@
+from collections import defaultdict, namedtuple
 import multiprocessing as mp
-from energypy.common.memories import calculate_returns
-
-from collections import namedtuple, defaultdict
 from time import sleep
 
 import numpy as np
 
 import energypy
+from energypy.common.memories import calculate_returns
 
-NJOBS=4
+
+NJOBS = 6
+NUM_ROLLOUTS = 1000
 
 
 def count(rand, output):
@@ -20,14 +21,22 @@ def count(rand, output):
 def single_rollout(output, env, seed):
     """ using uniform random policy means we don't need any stats """
 
+    max_len = 36
+
     done = False
     actions, rewards = [], []
+    step = 0
     while not done:
         action = env.action_space.sample_discrete()
         s, r, done, info = env.step(action)
 
         actions.append(action)
         rewards.append(r)
+
+        if step >= max_len:
+            done = True
+        else:
+            step += 1
 
     mc_returns = calculate_returns(
         rewards, discount=1.0
@@ -88,6 +97,7 @@ def policy(summary):
         actions.append(action)
         returns.append(stat.mean)
 
+    print(actions, returns)
     idx = np.argmax(returns)
     best = actions[idx]
 
@@ -97,7 +107,7 @@ def get_action(env):
 
     stats = defaultdict(list)
 
-    for _ in range(50):
+    for _ in range(NUM_ROLLOUTS):
         stats = rollouts(stats, deepcopy(env))
 
     summary = summarize(stats)
@@ -108,7 +118,10 @@ if __name__ == '__main__':
     from copy import deepcopy
 
     done = False
-    env = energypy.make_env('cartpole-v0')
+    env = energypy.make_env(
+        'flex', episode_length=20, episode_sample='fixed'
+    )
+    # env = energypy.make_env('cartpole-v0')
     actions = env.action_space.discretize(20)
     s = env.reset()
 
@@ -116,7 +129,9 @@ if __name__ == '__main__':
     while not done:
         action = get_action(deepcopy(env))
         s, r, done, info = env.step(action)
-        print(len)
+
+        print(len, action, info['reward'])
         len += 1
 
+    print(np.sum(info['reward']))
     print(len(info['reward']))
