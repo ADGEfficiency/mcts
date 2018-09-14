@@ -8,50 +8,45 @@ import numpy as np
 
 import energypy
 
+NJOBS=4
+
 
 def count(rand, output):
     for num in range(rand):
         sleep(1)
-        print(num)
     output.put(num)
 
 
-def single_rollout(output, seed):
+def single_rollout(output, env, seed):
     """ using uniform random policy means we don't need any stats """
 
     done = False
-    env = energypy.make_env('flex')
-    env.seed(seed)
-    actions = env.action_space.discretize(10)
-
-    s = env.reset()
-
+    actions, rewards = [], []
     while not done:
         action = env.action_space.sample_discrete()
-        s, r, done, i = env.step(action)
+        s, r, done, info = env.step(action)
+
+        actions.append(action)
+        rewards.append(r)
 
     mc_returns = calculate_returns(
-        i['reward'], discount=1.0
+        rewards, discount=1.0
     )
 
     out = {
         'return': mc_returns[0],
-        'action': i['action'][0]
+        'action': actions[0][0][0]
     }
-    # out = np.random.uniform()
     output.put(out)
 
-def run_parllel():
+
+def run_parllel(env):
     output = mp.Queue()
 
-    # processes = [mp.Process(
-    #     target=count, args=(np.random.randint(low=1, high=8), output))
-    #              for _ in range(3)]
-
-    seeds = [np.random.randint(0, 100) for _ in range(8)]
+    seeds = [np.random.randint(0, 100) for _ in range(NJOBS)]
 
     processes = [mp.Process(
-        target=single_rollout, args=(output, seed))
+        target=single_rollout, args=(output, env, seed))
                  for seed in seeds]
 
     [p.start() for p in processes]
@@ -61,47 +56,67 @@ def run_parllel():
 
     return results
 
-if __name__ == '__main__':
+def backprop(infos, stats):
 
-    def backprop(infos, stats):
+    for info in infos:
+        action = info['action']
+        mc_return = info['return']
 
-        for info in infos:
-            action = info['action']
-            mc_return = info['return']
+        stats[action].append(float(mc_return))
 
-            stats[action].append(float(mc_return))
+    return stats
 
-        return stats
+def rollouts(stats, env):
+    infos = run_parllel(env)
+    stats = backprop(infos, stats)
+    return stats
 
-    def rollouts(stats):
-        infos = run_parllel()
-        stats = backprop(infos, stats)
-        return stats
+def summarize(stats):
+    summary = {}
+    stat = namedtuple('stat', ['mean', 'std'])
 
-    def summarize(stats):
-        summary = {}
-        stat = namedtuple('stat', ['mean', 'std'])
+    for action, returns in stats.items():
+        summary[action] = stat(np.mean(returns), np.std(returns))
 
-        for action, returns in stats.items():
-            summary[action] = stat(np.mean(returns), np.std(returns))
+    return summary
 
-        print(summary)
-        return summary
+def policy(summary):
 
-    def policy(stats):
+    actions, returns = [], []
 
-        actions, returns = [], []
+    for action, stat in summary.items():
+        actions.append(action)
+        returns.append(stat.mean)
 
-        for action, mc_return in stats.items():
-            actions.append(action)
-            returns.append(mc_return)
+    idx = np.argmax(returns)
+    best = actions[idx]
 
-        return actions[np.argmax(returns)]
+    return np.array(best).reshape(1,1)
+
+def get_action(env):
 
     stats = defaultdict(list)
-    for _ in range(100):
-        stats = rollouts(stats)
-        summarize(stats)
 
-        action = policy(stats)
-        print(action)
+    for _ in range(50):
+        stats = rollouts(stats, deepcopy(env))
+
+    summary = summarize(stats)
+
+    return policy(summary)
+
+if __name__ == '__main__':
+    from copy import deepcopy
+
+    done = False
+    env = energypy.make_env('cartpole-v0')
+    actions = env.action_space.discretize(20)
+    s = env.reset()
+
+    len = 0
+    while not done:
+        action = get_action(deepcopy(env))
+        s, r, done, info = env.step(action)
+        print(len)
+        len += 1
+
+    print(len(info['reward']))
