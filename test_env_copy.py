@@ -2,6 +2,8 @@ import copy
 
 import energy_py
 
+#  check seeding & check rollouts are the same for the same actions
+
 
 env = energy_py.make_env('flex')
 env.reset()
